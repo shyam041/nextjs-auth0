@@ -8,7 +8,7 @@ const NavBarItem = ({ children, href, className, icon, tabIndex, testId }) => {
 
   return (
     <span className="d-inline-flex align-items-center navbar-item">
-      {icon && <span>YeahHey</span>}
+      {icon && <span>Yeah Hey</span>}
       <span className={pathname === href ? activeClasses : className} tabIndex={tabIndex} data-testid={testId}>
         {children}
       </span>
