@@ -1,0 +1,645 @@
+"use client"
+
+import { useState, useRef, useEffect } from "react"
+import type React from "react"
+import { Button } from "@/components/ui/button"
+import { ChevronDown, Plus, FileText, TagIcon, X, Check } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu"
+import { SendIcon } from "@/components/ui/icons"
+
+// Types
+export interface Attachment {
+  id: string
+  type: "document" | "tag"
+  name: string
+  fileType?: "pdf" | "doc" | "docx" | "xls" | "xlsx"
+  icon?: React.ReactNode
+}
+
+export interface IntegratedChatInputProps {
+  onSend: (message: string, attachments: Attachment[]) => void
+  placeholder?: string
+  className?: string
+  initialAttachments?: Attachment[]
+}
+
+interface CommandOption {
+  id: string
+  label: string
+  value: string
+  icon: React.ReactNode
+}
+
+interface FilterButtonProps {
+  className?: string
+}
+
+interface MenuPanelProps {
+  onClose: () => void
+  title: string
+  children: React.ReactNode
+}
+
+interface AttachmentTagProps {
+  attachment: Attachment
+  onRemove: (id: string) => void
+}
+
+interface CommandMenuProps {
+  options: CommandOption[]
+  selectedIndex: number
+  position: { top: number; left: number }
+  onSelect: (option: CommandOption) => void
+  menuRef: React.RefObject<HTMLDivElement>
+}
+
+// Utility for caret position calculation
+const getCaretCoordinates = (textarea: HTMLTextAreaElement, position: number) => {
+  const { offsetLeft, offsetTop } = textarea
+  const div = document.createElement("div")
+  const styles = getComputedStyle(textarea)
+
+  div.style.position = "absolute"
+  div.style.top = "0"
+  div.style.left = "0"
+  div.style.width = styles.width
+  div.style.height = "auto"
+  div.style.padding = styles.padding
+  div.style.font = styles.font
+  div.style.lineHeight = styles.lineHeight
+  div.style.whiteSpace = "pre-wrap"
+  div.style.wordWrap = "break-word"
+  div.style.visibility = "hidden"
+
+  const text = textarea.value.substring(0, position)
+  div.textContent = text
+
+  const span = document.createElement("span")
+  span.textContent = textarea.value.charAt(position) || "."
+  div.appendChild(span)
+
+  document.body.appendChild(div)
+  const rect = span.getBoundingClientRect()
+  document.body.removeChild(div)
+
+  return {
+    top: rect.top - textarea.scrollTop + offsetTop,
+    left: rect.left - textarea.scrollLeft + offsetLeft,
+    height: rect.height,
+  }
+}
+
+// Component for filter button
+export function FilterButton({ className }: FilterButtonProps) {
+  return (
+    <Button 
+      variant="outline" 
+      size="sm" 
+      className={cn("rounded-full bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground", className)}
+    >
+      Filters
+    </Button>
+  )
+}
+
+// Component for attachment tags
+function AttachmentTag({ attachment, onRemove }: AttachmentTagProps) {
+  return (
+    <div className="flex items-center bg-muted rounded-full px-3 py-1 text-sm">
+      {attachment.icon || (
+        attachment.type === "document" ? 
+          <FileText size={16} className="mr-1 text-muted-foreground" /> : 
+          <TagIcon size={16} className="mr-1 text-muted-foreground" />
+      )}
+      <span className="text-foreground">{attachment.name}</span>
+      <button
+        onClick={() => onRemove(attachment.id)}
+        className="ml-1 text-muted-foreground hover:text-foreground"
+        aria-label={`Remove ${attachment.name}`}
+      >
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
+// Component for command menu
+function CommandMenu({ options, selectedIndex, position, onSelect, menuRef }: CommandMenuProps) {
+  return (
+    <div
+      ref={menuRef}
+      className="absolute bg-background border border-border shadow-md z-50 rounded-md overflow-hidden"
+      style={{
+        bottom: `calc(100% - ${position.top}px)`,
+        left: `${position.left}px`,
+        width: "250px",
+        marginBottom: "5px",
+      }}
+    >
+      {options.map((option, index) => (
+        <button
+          key={option.id}
+          className={cn(
+            "flex items-center justify-between w-full px-4 py-3 text-sm text-left cursor-pointer hover:bg-muted",
+            index < options.length - 1 ? "border-b border-border" : "",
+            selectedIndex === index ? "bg-muted" : "",
+          )}
+          onClick={() => onSelect(option)}
+        >
+          <div className="flex items-center">
+            {option.icon}
+            <span className="ml-2">{option.label}</span>
+          </div>
+          <ChevronDown className="h-4 w-4 transform -rotate-90 text-muted-foreground" />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Component for menu panels (document selector, tag selector)
+function MenuPanel({ onClose, title, children }: MenuPanelProps) {
+  return (
+    <div className="absolute bottom-full left-0 mb-2 w-[300px] bg-background border border-border shadow-md z-50 rounded-md overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <h3 className="font-medium text-foreground">{title}</h3>
+        <button 
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground"
+          aria-label="Close menu"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="max-h-[300px] overflow-y-auto">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// Document Selector Component
+export function DocumentSelector({ onSelect, onClose }: { 
+  onSelect: (document: { name: string, type: string }) => void,
+  onClose: () => void 
+}) {
+  // Sample documents - in a real application, these would come from an API or props
+  const documents = [
+    { id: "1", name: "Product Roadmap", type: "pdf" },
+    { id: "2", name: "Q2 Financial Report", type: "xlsx" },
+    { id: "3", name: "Meeting Notes", type: "docx" },
+    { id: "4", name: "User Research", type: "pdf" },
+  ]
+
+  return (
+    <MenuPanel onClose={onClose} title="Select Document">
+      <div className="p-2">
+        <input 
+          type="text"
+          placeholder="Search documents..."
+          className="w-full p-2 mb-2 border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <div className="space-y-1">
+          {documents.map((doc) => (
+            <button
+              key={doc.id}
+              className="flex items-center w-full p-2 hover:bg-muted rounded-md text-left"
+              onClick={() => {
+                onSelect(doc)
+                onClose()
+              }}
+            >
+              <FileText size={16} className="mr-2 text-muted-foreground" />
+              <span className="flex-1 text-sm text-foreground">{doc.name}</span>
+              <span className="text-xs uppercase text-muted-foreground">{doc.type}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </MenuPanel>
+  )
+}
+
+// Tag Selector Component
+export function TagSelector({ onSelect, onClose }: { 
+  onSelect: (tag: { name: string }) => void,
+  onClose: () => void 
+}) {
+  // Sample tags - in a real application, these would come from an API or props
+  const tags = [
+    { id: "1", name: "Urgent" },
+    { id: "2", name: "Question" },
+    { id: "3", name: "Feature Request" },
+    { id: "4", name: "Bug" },
+  ]
+
+  return (
+    <MenuPanel onClose={onClose} title="Select Tag">
+      <div className="p-2">
+        <input 
+          type="text"
+          placeholder="Search tags..."
+          className="w-full p-2 mb-2 border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <div className="space-y-1">
+          {tags.map((tag) => (
+            <button
+              key={tag.id}
+              className="flex items-center w-full p-2 hover:bg-muted rounded-md text-left"
+              onClick={() => {
+                onSelect(tag)
+                onClose()
+              }}
+            >
+              <TagIcon size={16} className="mr-2 text-muted-foreground" />
+              <span className="text-sm text-foreground">{tag.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </MenuPanel>
+  )
+}
+
+// Main Chat Input Component
+export function IntegratedChatInput({
+  onSend,
+  placeholder = "Type message",
+  className,
+  initialAttachments = [],
+}: IntegratedChatInputProps) {
+  const [message, setMessage] = useState("")
+  const [attachments, setAttachments] = useState<Attachment[]>(initialAttachments)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [menuType, setMenuType] = useState<"none" | "documents" | "tags">("none")
+  const MAX_ATTACHMENTS = 5
+  const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false)
+  const [selectedWorkspace, setSelectedWorkspace] = useState("General")
+
+  // Command menu state
+  const [showCommandMenu, setShowCommandMenu] = useState(false)
+  const [commandMenuPosition, setCommandMenuPosition] = useState({ top: 0, left: 0 })
+  const [commandOptions, setCommandOptions] = useState<CommandOption[]>([])
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
+  const commandMenuRef = useRef<HTMLDivElement>(null)
+
+  // Available command options
+  const availableCommands: CommandOption[] = [
+    { id: "documents", label: "Documents", value: "documents", icon: <FileText className="h-4 w-4" /> },
+    { id: "tags", label: "Tags", value: "tags", icon: <TagIcon className="h-4 w-4" /> },
+  ]
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const adjustHeight = () => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+
+      textarea.style.height = "auto"
+      const newHeight = Math.min(Math.max(textarea.scrollHeight, 40), 200)
+      textarea.style.height = `${newHeight}px`
+    }
+
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.addEventListener("input", adjustHeight)
+      adjustHeight() // Initial adjustment
+    }
+
+    return () => {
+      if (textarea) {
+        textarea.removeEventListener("input", adjustHeight)
+      }
+    }
+  }, [])
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      
+      if ((menuType !== "none" || isPlusMenuOpen) && !target.closest(".menu-container")) {
+        setMenuType("none")
+        setIsPlusMenuOpen(false)
+      }
+
+      if (showCommandMenu && commandMenuRef.current && !commandMenuRef.current.contains(target)) {
+        setShowCommandMenu(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [menuType, isPlusMenuOpen, showCommandMenu])
+
+  const handleSend = () => {
+    if (message.trim() || attachments.length > 0) {
+      onSend(message, attachments)
+      setMessage("")
+      setAttachments([])
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "40px"
+      }
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Handle command menu navigation
+    if (showCommandMenu) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setSelectedCommandIndex((prev) => (prev + 1) % commandOptions.length)
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setSelectedCommandIndex((prev) => (prev - 1 + commandOptions.length) % commandOptions.length)
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault()
+        selectCommand(commandOptions[selectedCommandIndex])
+      } else if (e.key === "Escape") {
+        e.preventDefault()
+        setShowCommandMenu(false)
+      }
+      return
+    }
+    
+    // Normal send behavior when command menu is not shown
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value
+    setMessage(newValue)
+
+    // Check for @ commands
+    const lastAtSymbolIndex = newValue.lastIndexOf("@")
+    if (lastAtSymbolIndex !== -1) {
+      const textAfterAt = newValue.slice(lastAtSymbolIndex + 1)
+      const hasSpaceAfterCommand = /\s/.test(textAfterAt)
+
+      if (!hasSpaceAfterCommand) {
+        // Filter commands based on what's typed after @
+        const filtered = availableCommands.filter((cmd) => 
+          cmd.label.toLowerCase().includes(textAfterAt.toLowerCase())
+        )
+
+        if (filtered.length > 0) {
+          setCommandOptions(filtered)
+          setSelectedCommandIndex(0)
+
+          // Position the command menu
+          if (textareaRef.current) {
+            const textarea = textareaRef.current
+            const caretPosition = getCaretCoordinates(textarea, lastAtSymbolIndex)
+
+            setCommandMenuPosition({
+              top: caretPosition.top,
+              left: caretPosition.left,
+            })
+
+            setShowCommandMenu(true)
+          }
+        } else {
+          setShowCommandMenu(false)
+        }
+      } else {
+        setShowCommandMenu(false)
+      }
+    } else {
+      setShowCommandMenu(false)
+    }
+  }
+
+  const selectCommand = (command: CommandOption) => {
+    setShowCommandMenu(false)
+
+    // Replace the @command with the selected command
+    const lastAtSymbolIndex = message.lastIndexOf("@")
+    if (lastAtSymbolIndex !== -1) {
+      const newMessage = message.substring(0, lastAtSymbolIndex)
+      setMessage(newMessage)
+
+      // Open the corresponding menu
+      if (command.value === "documents") {
+        setMenuType("documents")
+      } else if (command.value === "tags") {
+        setMenuType("tags")
+      }
+    }
+  }
+
+  const handleAddDocument = (document: any) => {
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      // Could add toast notification here
+      console.log("Maximum attachments reached")
+      return
+    }
+
+    const newAttachment: Attachment = {
+      id: `doc-${Date.now()}`,
+      type: "document",
+      name: document.name,
+      fileType: document.type,
+      icon: <FileText size={16} className="text-muted-foreground" />,
+    }
+    
+    setAttachments([...attachments, newAttachment])
+  }
+
+  const handleAddTag = (tag: any) => {
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      // Could add toast notification here
+      console.log("Maximum attachments reached")
+      return
+    }
+
+    const newAttachment: Attachment = {
+      id: `tag-${Date.now()}`,
+      type: "tag",
+      name: tag.name,
+      icon: <TagIcon size={16} className="text-muted-foreground" />,
+    }
+    
+    setAttachments([...attachments, newAttachment])
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments(attachments.filter((attachment) => attachment.id !== id))
+  }
+
+  const toggleMenu = (type: "documents" | "tags") => {
+    if (menuType === type) {
+      setMenuType("none")
+      setIsPlusMenuOpen(false)
+    } else {
+      setMenuType(type)
+      setIsPlusMenuOpen(false)
+    }
+  }
+
+  const togglePlusMenu = () => {
+    setIsPlusMenuOpen(!isPlusMenuOpen)
+    setMenuType("none")
+  }
+
+  // Available workspaces - in a real app, these would come from context or props
+  const workspaces = ["General", "Personal", "GMT Playbook", "Products"]
+
+  return (
+    <div className={cn(
+      "flex flex-col border border-border shadow-sm bg-background rounded-md",
+      className
+    )}>
+      {/* Attachments area */}
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 p-3 border-b border-border">
+          {attachments.map((attachment) => (
+            <AttachmentTag 
+              key={attachment.id} 
+              attachment={attachment} 
+              onRemove={removeAttachment}
+            />
+          ))}
+
+          {attachments.length >= MAX_ATTACHMENTS && (
+            <div className="flex items-center text-destructive text-xs ml-2">
+              {MAX_ATTACHMENTS} files max. Remove a file to add more.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Text area container */}
+      <div className="px-3 pt-3 relative">
+        <textarea
+          ref={textareaRef}
+          value={message}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          rows={1}
+          className="w-full bg-transparent border-0 focus:ring-0 focus:outline-none resize-none min-h-[40px] max-h-[200px] overflow-y-auto text-foreground placeholder:text-muted-foreground"
+          style={{ height: "40px" }}
+        />
+
+        {/* Command menu */}
+        {showCommandMenu && commandOptions.length > 0 && (
+          <CommandMenu
+            options={commandOptions}
+            selectedIndex={selectedCommandIndex}
+            position={commandMenuPosition}
+            onSelect={selectCommand}
+            menuRef={commandMenuRef}
+          />
+        )}
+      </div>
+
+      {/* Button container */}
+      <div className="flex items-center justify-between px-3 pb-3">
+        <div className="flex items-center space-x-2">
+          {/* Workspace Selector */}
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex items-center rounded-full px-4 py-2 bg-muted text-foreground hover:bg-muted/80">
+              <span className="text-sm mr-2">{selectedWorkspace}</span>
+              <ChevronDown size={14} className="text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="w-[200px] p-0 border border-border shadow-md rounded-md overflow-hidden"
+              sideOffset={4}
+            >
+              {workspaces.map((workspace) => (
+                <DropdownMenuItem 
+                  key={workspace}
+                  className={cn(
+                    "flex items-center justify-between py-3 px-4 cursor-pointer hover:bg-muted border-b border-border last:border-b-0",
+                    workspace === selectedWorkspace ? "bg-muted/50" : ""
+                  )}
+                  onClick={() => setSelectedWorkspace(workspace)}
+                >
+                  {workspace}
+                  {workspace === selectedWorkspace && (
+                    <Check size={16} className="text-primary" />
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <FilterButton />
+
+          {/* Plus button menu */}
+          <div className="relative menu-container">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={togglePlusMenu}
+              className="flex items-center justify-center rounded-full h-9 w-9 bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+            >
+              <Plus size={16} />
+              <span className="sr-only">Add content</span>
+            </Button>
+
+            {menuType === "documents" && (
+              <DocumentSelector 
+                onSelect={handleAddDocument} 
+                onClose={() => setMenuType("none")} 
+              />
+            )}
+
+            {menuType === "tags" && (
+              <TagSelector 
+                onSelect={handleAddTag} 
+                onClose={() => setMenuType("none")} 
+              />
+            )}
+
+            {isPlusMenuOpen && (
+              <div className="absolute bottom-full left-0 mb-2 w-[250px] bg-background border border-border shadow-md z-50 rounded-md overflow-hidden">
+                <button
+                  className="flex items-center justify-between w-full px-4 py-3 text-sm text-left cursor-pointer hover:bg-muted border-b border-border"
+                  onClick={() => toggleMenu("documents")}
+                >
+                  <div className="flex items-center">
+                    <FileText className="mr-2 h-4 w-4 text-muted-foreground" />
+                    <span className="text-foreground">Documents</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 transform -rotate-90 text-muted-foreground" />
+                </button>
+                <button
+                  className="flex items-center justify-between w-full px-4 py-3 text-sm text-left cursor-pointer hover:bg-muted"
+                  onClick={() => toggleMenu("tags")}
+                >
+                  <div className="flex items-center">
+                    <TagIcon className="mr-2 h-4 w-4 text-muted-foreground" />
+                    <span className="text-foreground">Tags</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 transform -rotate-90 text-muted-foreground" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Send Button */}
+        <Button
+          size="icon"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-full h-10 w-10"
+          onClick={handleSend}
+        >
+          <SendIcon className="h-5 w-5" />
+        </Button>
+      </div>
+    </div>
+  )
+}
