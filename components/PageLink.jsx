@@ -25,17 +25,22 @@ import SearchDocuments from "./search-document"
 import LoadingSkelton from "./loading-skelton"
 import DocumentRow from "./document-row"
 
+type SortDirection = "ASC" | "DESC" | "NONE"
+type SortKey = "document_name" | "tag" | "uploaded_by" | "uploaded_on" | "focus_area"
+
 export default function DocumentTable() {
     const [page, setPage] = useState(1)
     const [pageSize, setPageSize] = useState(10)
     const [searchTerm, setSearchTerm] = useState("")
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm)
+    const [sortKey, setSortKey] = useState<SortKey>("document_name")
+    const [sortDirection, setSortDirection] = useState<SortDirection>("DESC")
 
     const { data, isLoading, isError, error, refetch } = useDocuments({
         page,
         items_per_page: pageSize,
-        sort_by: "document_name",
-        sort_order: "desc",
+        sort_by: sortKey,
+        sort_order: sortDirection.toLowerCase() as "asc" | "desc",
         search_document_name: searchTerm || undefined,
     })
 
@@ -93,9 +98,37 @@ export default function DocumentTable() {
         console.log("Download:", doc)
     }
 
+    const handleSort = (key: string) => {
+        if (key === "actions") return // Don't sort actions column
+        
+        const sortableKey = key as SortKey
+        
+        if (sortKey === sortableKey) {
+            // Toggle direction if same key
+            if (sortDirection === "DESC") {
+                setSortDirection("ASC")
+            } else if (sortDirection === "ASC") {
+                setSortDirection("NONE")
+                setSortKey("document_name") // Reset to default
+            } else {
+                setSortDirection("DESC")
+            }
+        } else {
+            // New key, start with DESC
+            setSortKey(sortableKey)
+            setSortDirection("DESC")
+        }
+    }
+
     if (isError) {
         return <TryAgain error={error} refetch={refetch} />
     }
+
+    // Add isSortable property to headers for sortable columns
+    const sortableHeaders = headers.map(header => ({
+        ...header,
+        isSortable: header.key !== "actions",
+    }))
 
     return (
         <>
@@ -106,26 +139,55 @@ export default function DocumentTable() {
                 <>
                     <DataTable
                         rows={rows}
-                        headers={headers}
+                        headers={sortableHeaders}
+                        isSortable
                         sortRow={(a, b, { key, sortDirection }) => {
                             const valA = a[key] || ""
                             const valB = b[key] || ""
+                            
+                            // For date sorting, convert to timestamps
+                            if (key === "uploaded_on") {
+                                const dateA = new Date(valA).getTime()
+                                const dateB = new Date(valB).getTime()
+                                if (dateA < dateB) return sortDirection === "ASC" ? -1 : 1
+                                if (dateA > dateB) return sortDirection === "ASC" ? 1 : -1
+                                return 0
+                            }
+                            
+                            // For string sorting
                             if (valA < valB) return sortDirection === "ASC" ? -1 : 1
                             if (valA > valB) return sortDirection === "ASC" ? 1 : -1
                             return 0
                         }}
-                        render={({ rows, headers, getHeaderProps, getTableProps, getRowProps }) => (
-                            <TableContainer>
+                        render={({ 
+                            rows, 
+                            headers, 
+                            getHeaderProps, 
+                            getTableProps, 
+                            getRowProps,
+                            getTableContainerProps 
+                        }) => (
+                            <TableContainer {...getTableContainerProps()}>
                                 <Table {...getTableProps()}>
                                     <TableHead>
                                         <TableRow>
                                             {headers.map((header) => {
-                                                const { key, ...rest } = getHeaderProps({ header })
+                                                const { key, ...rest } = getHeaderProps({ 
+                                                    header,
+                                                    onClick: () => handleSort(header.key),
+                                                    isSortable: header.isSortable,
+                                                })
                                                 return (
                                                     <TableHeader
                                                         key={key}
                                                         {...rest}
                                                         className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                                        isSortable={header.isSortable}
+                                                        sortDirection={
+                                                            sortKey === header.key 
+                                                                ? sortDirection 
+                                                                : "NONE"
+                                                        }
                                                     >
                                                         {header.header}
                                                     </TableHeader>
@@ -140,6 +202,7 @@ export default function DocumentTable() {
                                                 row={row}
                                                 handleDownload={handleDownload}
                                                 handleDelete={handleDelete}
+                                                {...getRowProps({ row })}
                                             />
                                         ))}
                                     </TableBody>
