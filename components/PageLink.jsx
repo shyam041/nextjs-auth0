@@ -25,22 +25,21 @@ import SearchDocuments from "./search-document"
 import LoadingSkelton from "./loading-skelton"
 import DocumentRow from "./document-row"
 
-type SortDirection = "ASC" | "DESC" | "NONE"
-type SortKey = "document_name" | "tag" | "uploaded_by" | "uploaded_on" | "focus_area"
-
 export default function DocumentTable() {
     const [page, setPage] = useState(1)
     const [pageSize, setPageSize] = useState(10)
     const [searchTerm, setSearchTerm] = useState("")
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm)
-    const [sortKey, setSortKey] = useState<SortKey>("document_name")
-    const [sortDirection, setSortDirection] = useState<SortDirection>("DESC")
+    const [sortInfo, setSortInfo] = useState({
+        key: "document_name",
+        direction: "DESC" as "DESC" | "ASC"
+    })
 
     const { data, isLoading, isError, error, refetch } = useDocuments({
         page,
         items_per_page: pageSize,
-        sort_by: sortKey,
-        sort_order: sortDirection.toLowerCase() as "asc" | "desc",
+        sort_by: sortInfo.key,
+        sort_order: sortInfo.direction.toLowerCase() as "asc" | "desc",
         search_document_name: searchTerm || undefined,
     })
 
@@ -98,28 +97,6 @@ export default function DocumentTable() {
         console.log("Download:", doc)
     }
 
-    const handleSort = (key: string) => {
-        if (key === "actions") return // Don't sort actions column
-        
-        const sortableKey = key as SortKey
-        
-        if (sortKey === sortableKey) {
-            // Toggle direction if same key
-            if (sortDirection === "DESC") {
-                setSortDirection("ASC")
-            } else if (sortDirection === "ASC") {
-                setSortDirection("NONE")
-                setSortKey("document_name") // Reset to default
-            } else {
-                setSortDirection("DESC")
-            }
-        } else {
-            // New key, start with DESC
-            setSortKey(sortableKey)
-            setSortDirection("DESC")
-        }
-    }
-
     if (isError) {
         return <TryAgain error={error} refetch={refetch} />
     }
@@ -155,8 +132,11 @@ export default function DocumentTable() {
                             }
                             
                             // For string sorting
-                            if (valA < valB) return sortDirection === "ASC" ? -1 : 1
-                            if (valA > valB) return sortDirection === "ASC" ? 1 : -1
+                            const compareA = valA.toString().toLowerCase()
+                            const compareB = valB.toString().toLowerCase()
+                            
+                            if (compareA < compareB) return sortDirection === "ASC" ? -1 : 1
+                            if (compareA > compareB) return sortDirection === "ASC" ? 1 : -1
                             return 0
                         }}
                         render={({ 
@@ -171,28 +151,27 @@ export default function DocumentTable() {
                                 <Table {...getTableProps()}>
                                     <TableHead>
                                         <TableRow>
-                                            {headers.map((header) => {
-                                                const { key, ...rest } = getHeaderProps({ 
-                                                    header,
-                                                    onClick: () => handleSort(header.key),
-                                                    isSortable: header.isSortable,
-                                                })
-                                                return (
-                                                    <TableHeader
-                                                        key={key}
-                                                        {...rest}
-                                                        className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                                        isSortable={header.isSortable}
-                                                        sortDirection={
-                                                            sortKey === header.key 
-                                                                ? sortDirection 
-                                                                : "NONE"
+                                            {headers.map((header) => (
+                                                <TableHeader
+                                                    key={header.key}
+                                                    {...getHeaderProps({ header })}
+                                                    className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                                    onClick={() => {
+                                                        if (header.key !== "actions") {
+                                                            const newDirection = 
+                                                                sortInfo.key === header.key && sortInfo.direction === "DESC" 
+                                                                    ? "ASC" 
+                                                                    : "DESC"
+                                                            setSortInfo({
+                                                                key: header.key,
+                                                                direction: newDirection
+                                                            })
                                                         }
-                                                    >
-                                                        {header.header}
-                                                    </TableHeader>
-                                                )
-                                            })}
+                                                    }}
+                                                >
+                                                    {header.header}
+                                                </TableHeader>
+                                            ))}
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
