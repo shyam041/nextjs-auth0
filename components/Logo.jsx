@@ -1,10 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { useSlateStatic } from "slate-react";
-import { useDispatch, useSelector } from "react-redux";
 import { cn } from "@/lib/utils";
-import { toggleCommandMenu } from "@/store/reducers/ui";
-import { RootState } from "@/store";
 import useChatInput from "@/hooks/useChatInput";
 import useChatFiles from "@/hooks/useChatFiles";
 import useCommandMenu from "@/hooks/useCommandMenu";
@@ -14,10 +11,10 @@ import { useMaxInputHeight } from "@/hooks/useMaxInputHeight";
 
 export default function ChatInputWrapper() {
   const editor = useSlateStatic();
-  const dispatch = useDispatch();
-  const isCommandMenuOpen = useSelector((state: RootState) => state.ui.commandMenu);
 
   const [textareaValue, setTextareaValue] = useState("");
+  const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -34,7 +31,8 @@ export default function ChatInputWrapper() {
     editor,
     textareaRef,
     textareaValue,
-    setTextareaValue
+    setTextareaValue,
+    setIsCommandMenuOpen
   });
 
   const {
@@ -45,9 +43,9 @@ export default function ChatInputWrapper() {
   } = useChatFiles({ insertImage, insertFile });
 
   const handleCommandMenuClose = useCallback(() => {
-    dispatch(toggleCommandMenu(false));
+    setIsCommandMenuOpen(false);
     setTextareaValue("");
-  }, [dispatch]);
+  }, []);
 
   return (
     <div ref={inputWrapperRef} className="w-full">
