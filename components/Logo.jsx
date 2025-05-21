@@ -1,58 +1,88 @@
-// components/chat-input/chat-input-wrapper.tsx
-"use client"
-import { useState, useRef } from "react"
-import { Attachment, IntegratedChatInputProps } from "@/constants/interfaces"
-import { cn } from "@/lib/utils"
-import { ChatTextArea } from "./chat-textarea"
-import { ChatAttachmentBar } from "./chat-attachment-bar"
-import { ChatCommandMenu } from "./chat-command-menu"
+import React, { useCallback, useRef, useState } from "react";
+import TextareaAutosize from "react-textarea-autosize";
+import { useSlateStatic } from "slate-react";
+import { useDispatch, useSelector } from "react-redux";
+import { cn } from "@/lib/utils";
+import { toggleCommandMenu } from "@/store/reducers/ui";
+import { RootState } from "@/store";
+import useChatInput from "@/hooks/useChatInput";
+import useChatFiles from "@/hooks/useChatFiles";
+import useCommandMenu from "@/hooks/useCommandMenu";
+import CommandMenu from "@/components/chat/chat-input/command-menu/CommandMenu";
+import UploadAttachments from "@/components/chat/chat-input/UploadAttachments";
+import { useMaxInputHeight } from "@/hooks/useMaxInputHeight";
 
-export function ChatInputWrapper({ onSend, className, placeholder = "Type message" }: IntegratedChatInputProps) {
-  const [message, setMessage] = useState("")
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [commandMenuState, setCommandMenuState] = useState({
-    visible: false,
-    options: [],
-    position: { top: 0, left: 0 },
-    selectedIndex: 0,
-    prefix: ""
-  })
-  const [menuType, setMenuType] = useState<"none" | "documents" | "tags">("none")
-  const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+export default function ChatInputWrapper() {
+  const editor = useSlateStatic();
+  const dispatch = useDispatch();
+  const isCommandMenuOpen = useSelector((state: RootState) => state.ui.commandMenu);
 
-  const handleSend = () => {
-    if (!message.trim() && attachments.length === 0) return
-    onSend(message, attachments)
-    setMessage("")
-    setAttachments([])
-    if (textareaRef.current) textareaRef.current.style.height = "40px"
-  }
+  const [textareaValue, setTextareaValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputWrapperRef = useRef<HTMLDivElement>(null);
+
+  const maxInputHeight = useMaxInputHeight();
+
+  const {
+    handleChange,
+    handleKeyDown,
+    handlePaste,
+    handleDrop,
+    insertImage,
+    insertFile
+  } = useChatInput({
+    editor,
+    textareaRef,
+    textareaValue,
+    setTextareaValue
+  });
+
+  const {
+    handleAttachmentUpload,
+    onClickRemoveAttachment,
+    isUploading,
+    uploadedFiles
+  } = useChatFiles({ insertImage, insertFile });
+
+  const handleCommandMenuClose = useCallback(() => {
+    dispatch(toggleCommandMenu(false));
+    setTextareaValue("");
+  }, [dispatch]);
 
   return (
-    <div className={cn("flex flex-col border shadow-sm bg-background max-w-[60%] mx-auto", className)}>
-      <ChatAttachmentBar
-        attachments={attachments}
-        setAttachments={setAttachments}
-        maxAttachments={5}
-      />
-      <div className="px-3 pt-3 relative">
-        <ChatTextArea
-          textareaRef={textareaRef}
-          message={message}
-          setMessage={setMessage}
-          onSend={handleSend}
-          commandMenuState={commandMenuState}
-          setCommandMenuState={setCommandMenuState}
-        />
-        <ChatCommandMenu
-          commandMenuState={commandMenuState}
-          setCommandMenuState={setCommandMenuState}
-          setMenuType={setMenuType}
-          message={message}
-          setMessage={setMessage}
+    <div ref={inputWrapperRef} className="w-full">
+      <div className="flex w-full items-end gap-2 rounded-md border border-input bg-background px-3 py-2">
+        <TextareaAutosize
+          ref={textareaRef}
+          value={textareaValue}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onDrop={handleDrop}
+          placeholder="Message..."
+          className={cn(
+            "flex min-h-[20px] w-full resize-none bg-transparent text-sm text-foreground placeholder-muted-foreground focus:outline-none",
+            textareaValue.length ? "pt-2" : "pt-0"
+          )}
+          maxRows={8}
+          style={{ maxHeight: maxInputHeight }}
         />
       </div>
+
+      <UploadAttachments
+        isUploading={isUploading}
+        uploadedFiles={uploadedFiles}
+        onAttachmentUpload={handleAttachmentUpload}
+        onClickRemoveAttachment={onClickRemoveAttachment}
+      />
+
+      {isCommandMenuOpen && (
+        <CommandMenu
+          value={textareaValue}
+          containerRef={inputWrapperRef}
+          onClose={handleCommandMenuClose}
+        />
+      )}
     </div>
-  )
+  );
 }
