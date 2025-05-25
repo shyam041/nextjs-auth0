@@ -5,8 +5,9 @@ export async function proxyRequest(
     req: NextRequest,
     method: string,
     pathSegments: string[],
+    session?: any
 ): Promise<NextResponse> {
-    //console.log("REACHD PROXY")
+    console.log("REACHD PROXY", session)
     const url = `${BASE_URL}/${pathSegments.join("/")}${req.nextUrl.search}`
     const headers: HeadersInit = {
         "Content-Type": req.headers.get("content-type") || "application/json",
