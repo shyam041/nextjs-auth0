@@ -1,4 +1,5 @@
 import axios, { type AxiosError, type AxiosRequestConfig } from "axios"
+import { headers } from 'next/headers'
 
 const isMockingEnabled =
   typeof window !== "undefined" &&
@@ -6,7 +7,6 @@ const isMockingEnabled =
     process.env.NODE_ENV === "development" ||
     !process.env.NEXT_PUBLIC_API_URL)
 
-// const API_URL = isMockingEnabled ? "" : process.env.NEXT_PUBLIC_API_URL || ""
 // Determine the base URL based on environment
 const API_URL = typeof window === "undefined"
   ? process.env.APP_BASE_URL
@@ -22,6 +22,27 @@ if (typeof window === "undefined") {
   console.log("API_URL (client-side):", API_URL)
 }
 
+// Function to get server-side headers with cookies
+async function getServerHeaders(): Promise<Record<string, string>> {
+  if (typeof window !== "undefined") {
+    // Client-side: return empty headers (browser will handle cookies automatically)
+    return {}
+  }
+  
+  try {
+    // Server-side: get headers including cookies
+    const headersList = await headers()
+    const cookies = headersList.get('cookie') || ''
+    
+    return {
+      ...(cookies && { Cookie: cookies }),
+    }
+  } catch (error) {
+    console.warn('Failed to get server headers:', error)
+    return {}
+  }
+}
+
 // Create axios instance
 const axiosInstance = axios.create({
   baseURL: API_URL,
@@ -33,7 +54,16 @@ const axiosInstance = axios.create({
 
 // Request interceptor
 axiosInstance.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    // Add server-side headers (including cookies) for authentication
+    const serverHeaders = await getServerHeaders()
+    
+    // Merge server headers with existing headers
+    config.headers = {
+      ...config.headers,
+      ...serverHeaders,
+    }
+    
     return config
   },
   (error) => Promise.reject(error)
@@ -47,7 +77,10 @@ axiosInstance.interceptors.response.use(
       console.error("API Error Response:", error.response.status, error.response.data)
       if (error.response.status === 401) {
         console.warn("Unauthorized access, redirecting to login...")
-        // Optionally: window.location.href = "/login"
+        // Only redirect on client-side
+        if (typeof window !== "undefined") {
+          window.location.href = "/auth/login"
+        }
       }
     } else if (error.request) {
       console.error("API No Response:", error.request)
