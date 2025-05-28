@@ -1,5 +1,4 @@
 import axios, { type AxiosError, type AxiosRequestConfig } from "axios"
-import { headers } from 'next/headers'
 
 const isMockingEnabled =
   typeof window !== "undefined" &&
@@ -22,27 +21,6 @@ if (typeof window === "undefined") {
   console.log("API_URL (client-side):", API_URL)
 }
 
-// Function to get server-side headers with cookies
-async function getServerHeaders(): Promise<Record<string, string>> {
-  if (typeof window !== "undefined") {
-    // Client-side: return empty headers (browser will handle cookies automatically)
-    return {}
-  }
-  
-  try {
-    // Server-side: get headers including cookies
-    const headersList = await headers()
-    const cookies = headersList.get('cookie') || ''
-    
-    return {
-      ...(cookies && { Cookie: cookies }),
-    }
-  } catch (error) {
-    console.warn('Failed to get server headers:', error)
-    return {}
-  }
-}
-
 // Create axios instance
 const axiosInstance = axios.create({
   baseURL: API_URL,
@@ -54,16 +32,9 @@ const axiosInstance = axios.create({
 
 // Request interceptor
 axiosInstance.interceptors.request.use(
-  async (config) => {
-    // Add server-side headers (including cookies) for authentication
-    const serverHeaders = await getServerHeaders()
-    
-    // Merge server headers with existing headers
-    config.headers = {
-      ...config.headers,
-      ...serverHeaders,
-    }
-    
+  (config) => {
+    // Client-side: cookies are handled automatically by the browser
+    // Server-side: we'll handle this differently (see serverApiClient below)
     return config
   },
   (error) => Promise.reject(error)
@@ -91,8 +62,82 @@ axiosInstance.interceptors.response.use(
   }
 )
 
-// Typed API helper
-export const apiClient = {
+// Server-specific API client that can use next/headers
+const createServerApiClient = () => {
+  // Dynamic import to avoid issues with bundling
+  const getServerHeaders = async () => {
+    try {
+      const { headers } = await import('next/headers')
+      const headersList = await headers()
+      const cookies = headersList.get('cookie') || ''
+      return cookies ? { Cookie: cookies } : {}
+    } catch (error) {
+      console.warn('Failed to get server headers:', error)
+      return {}
+    }
+  }
+
+  return {
+    get: async <T>(url: string, config?: AxiosRequestConfig): Promise<T> => {
+      const serverHeaders = await getServerHeaders()
+      const response = await axiosInstance.get<T>(url, {
+        ...config,
+        headers: {
+          ...config?.headers,
+          ...serverHeaders,
+        }
+      })
+      return response.data
+    },
+    post: async <T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
+      const serverHeaders = await getServerHeaders()
+      const response = await axiosInstance.post<T>(url, data, {
+        ...config,
+        headers: {
+          ...config?.headers,
+          ...serverHeaders,
+        }
+      })
+      return response.data
+    },
+    put: async <T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
+      const serverHeaders = await getServerHeaders()
+      const response = await axiosInstance.put<T>(url, data, {
+        ...config,
+        headers: {
+          ...config?.headers,
+          ...serverHeaders,
+        }
+      })
+      return response.data
+    },
+    delete: async <T>(url: string, config?: AxiosRequestConfig): Promise<T> => {
+      const serverHeaders = await getServerHeaders()
+      const response = await axiosInstance.delete<T>(url, {
+        ...config,
+        headers: {
+          ...config?.headers,
+          ...serverHeaders,
+        }
+      })
+      return response.data
+    },
+    patch: async <T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
+      const serverHeaders = await getServerHeaders()
+      const response = await axiosInstance.patch<T>(url, data, {
+        ...config,
+        headers: {
+          ...config?.headers,
+          ...serverHeaders,
+        }
+      })
+      return response.data
+    },
+  }
+}
+
+// Regular client-side API client
+const clientApiClient = {
   get: async <T>(url: string, config?: AxiosRequestConfig): Promise<T> => {
     console.log("REACHED API CLIENT GET METHOD :: ", url)
     const response = await axiosInstance.get<T>(url, config)
@@ -115,5 +160,10 @@ export const apiClient = {
     return response.data
   },
 }
+
+// Export the appropriate client based on environment
+export const apiClient = typeof window === "undefined" 
+  ? createServerApiClient() 
+  : clientApiClient
 
 export default axiosInstance
