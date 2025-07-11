@@ -13,7 +13,7 @@ export async function proxyRequest(
         console.log("THE HEADERS ", key, "==>", value)
         headers[key] = value;
     })
-    
+
     // Check if request already includes an Authorization header
     const authHeader = req.headers.get("authorization")
     if (authHeader) {
@@ -29,11 +29,12 @@ export async function proxyRequest(
             return new NextResponse("Unauthorized", { status: 401 })
         }
     }
-
+    const isStreaming = ["POST", "PUT", "PATCH"].includes(method)
     const init: RequestInit = {
         method,
         headers,
-        body: ["POST", "PUT", "PATCH"].includes(method) ? await req.text() : undefined,
+        body: isStreaming ? req.body : undefined,
+        ...(isStreaming ? { duplex: "half" as const } : {})
     }
     try {
         const response = await fetch(url, init)
