@@ -1,4 +1,3 @@
-// Force Node.js runtime to support streaming uploads
 export const runtime = "nodejs"
 
 import { auth0 } from "@/lib/auth0"
@@ -13,22 +12,33 @@ export async function proxyRequest(
 ): Promise<NextResponse> {
     const url = `${BASE_URL}/${pathSegments.join("/")}${req.nextUrl.search}`
 
-    // Clone and forward headers
     const headers: HeadersInit = { ...Object.fromEntries(req.headers.entries()) }
 
-    // Ensure Authorization header is present
     if (!headers["authorization"]) {
         const { token } = await auth0.getAccessToken()
+        console.log("NEW TOKEN CREATED ON PROXY :: ", token)
         if (!token) return new NextResponse("Unauthorized", { status: 401 })
         headers["Authorization"] = `Bearer ${token}`
     }
 
-    const isStreaming = ["POST", "PUT", "PATCH"].includes(method)
+    const contentType = req.headers.get("content-type") || ""
+    let body: RequestInit["body"] = undefined
+
+    if (["POST", "PUT", "PATCH"].includes(method)) {
+        if (contentType.includes("application/json")) {
+            body = await req.text()
+        } else if (contentType.includes("multipart/form-data")) {
+            body = req.body
+        } else {
+            body = await req.text()
+        }
+    }
 
     const init: RequestInit = {
         method,
         headers,
-        body: ["POST", "PUT", "PATCH"].includes(method) ? await req.text() : undefined,
+        body,
+        ...(body instanceof ReadableStream ? { duplex: "half" as const } : {}),
     }
 
     try {
